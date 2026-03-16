@@ -33,7 +33,7 @@ function KOReaderPatch:addToMainMenu(menu_items)
 end
 
 function KOReaderPatch:showHomeScreen()
-    local ok, HomeScreen = pcall(require, "homescreen")
+    local ok, HomeScreen = pcall(require, "koreader_patch_homescreen")
     if not ok then
         local InfoMessage = require("ui/widget/infomessage")
         UIManager:show(InfoMessage:new{
