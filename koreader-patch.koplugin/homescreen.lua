@@ -30,7 +30,6 @@ local TextWidget      = require("ui/widget/textwidget")
 local Button          = require("ui/widget/button")
 local UIManager       = require("ui/uimanager")
 local Device          = require("device")
-local Screen          = Device.screen  -- Screen is Device.screen, not a standalone module
 local Font            = require("ui/font")
 local Geom            = require("ui/geometry")
 local Blitbuffer      = require("ffi/blitbuffer")
@@ -57,15 +56,28 @@ local C = {
 -- ── Font helper ───────────────────────────────────────────────────────────────
 local function F(size) return Font:getFace("cfont", size) end
 
--- ── Layout constants ──────────────────────────────────────────────────────────
-local sw = Screen:getWidth()
-local sh = Screen:getHeight()
-local STATUS_H = Screen:scaleBySize(28)
-local TAB_H    = Screen:scaleBySize(52)
-local PAGER_H  = Screen:scaleBySize(28)
-local PAD      = Screen:scaleBySize(14)
-local ROW_H    = Screen:scaleBySize(44)
-local DIV_H    = Screen:scaleBySize(1)
+-- ── Screen & layout constants (computed lazily — Screen may not be ready at
+--    require-time on Android) ─────────────────────────────────────────────────
+local Screen
+local sw, sh, STATUS_H, TAB_H, PAGER_H, PAD, ROW_H, DIV_H
+
+local function initLayout()
+    if sw then return true end                       -- already done
+    Screen = Device.screen
+    if not Screen then
+        Screen = lazy("device/screen")               -- fallback
+    end
+    if not Screen then return false end
+    sw       = Screen:getWidth()
+    sh       = Screen:getHeight()
+    STATUS_H = Screen:scaleBySize(28)
+    TAB_H    = Screen:scaleBySize(52)
+    PAGER_H  = Screen:scaleBySize(28)
+    PAD      = Screen:scaleBySize(14)
+    ROW_H    = Screen:scaleBySize(44)
+    DIV_H    = Screen:scaleBySize(1)
+    return true
+end
 
 local TABS = {
     { id = "home",    label = "Home"    },
@@ -117,6 +129,7 @@ local HomeScreen = InputContainer:extend{
 }
 
 function HomeScreen:init()
+    if not initLayout() then return end
     for _, t in ipairs(TABS) do
         self.tab_pages[t.id] = { page = 1, total = 1 }
     end
