@@ -1,7 +1,8 @@
 -- homescreen.lua — KOReader Patch
 -- Full-screen HomeScreen widget with tab navigation.
+-- ALL layout computation deferred to init() — nothing runs at module load time
+-- except require() calls for core KOReader modules.
 
-local Blitbuffer      = require("ffi/blitbuffer")
 local Button          = require("ui/widget/button")
 local CenterContainer = require("ui/widget/container/centercontainer")
 local Device          = require("device")
@@ -13,39 +14,8 @@ local InputContainer  = require("ui/widget/container/inputcontainer")
 local TextWidget      = require("ui/widget/textwidget")
 local UIManager       = require("ui/uimanager")
 local VerticalGroup   = require("ui/widget/verticalgroup")
-local logger          = require("logger")
 local _               = require("gettext")
 
-local Screen = Device.screen
-
--- ---------------------------------------------------------------------------
--- Colour palette
--- ---------------------------------------------------------------------------
-local C = {
-    paper    = Blitbuffer.gray(0.96),
-    surface  = Blitbuffer.COLOR_WHITE,
-    border   = Blitbuffer.gray(0.80),
-    tabBg    = Blitbuffer.gray(0.90),
-    statusBg = Blitbuffer.gray(0.92),
-    black    = Blitbuffer.COLOR_BLACK,
-    dim      = Blitbuffer.gray(0.45),
-}
-
--- ---------------------------------------------------------------------------
--- Layout constants — computed once at load time (Screen is available)
--- ---------------------------------------------------------------------------
-local STATUS_H = Screen:scaleBySize(28)
-local TAB_H    = Screen:scaleBySize(52)
-local PAGER_H  = Screen:scaleBySize(28)
-local PAD      = Screen:scaleBySize(14)
-local ROW_H    = Screen:scaleBySize(44)
-local DIV_H    = Screen:scaleBySize(1)
-
-local function F(size) return Font:getFace("cfont", size) end
-
--- ---------------------------------------------------------------------------
--- Tabs definition
--- ---------------------------------------------------------------------------
 local TABS = {
     { id = "home",    label = "Home"    },
     { id = "library", label = "Library" },
@@ -54,24 +24,9 @@ local TABS = {
     { id = "more",    label = "More"    },
 }
 
--- ---------------------------------------------------------------------------
--- Lazy-load helper
--- ---------------------------------------------------------------------------
 local function lazy(mod)
     local ok, m = pcall(require, mod)
     return ok and m or nil
-end
-
--- ---------------------------------------------------------------------------
--- Widget helpers
--- ---------------------------------------------------------------------------
-local function divider(width)
-    return FrameContainer:new{
-        width      = width,
-        height     = DIV_H,
-        bordersize = 0,
-        background = C.border,
-    }
 end
 
 -- ---------------------------------------------------------------------------
@@ -85,9 +40,30 @@ local HomeScreen = InputContainer:extend{
 }
 
 function HomeScreen:init()
+    local Screen = Device.screen
+    local Blitbuffer = require("ffi/blitbuffer")
+
+    -- Layout constants
+    self._S = Screen
+    self._BB = Blitbuffer
+    self._C = {
+        paper    = Blitbuffer.gray(0.96),
+        surface  = Blitbuffer.COLOR_WHITE,
+        border   = Blitbuffer.gray(0.80),
+        tabBg    = Blitbuffer.gray(0.90),
+        statusBg = Blitbuffer.gray(0.92),
+        black    = Blitbuffer.COLOR_BLACK,
+        dim      = Blitbuffer.gray(0.45),
+    }
+    self._STATUS_H = Screen:scaleBySize(28)
+    self._TAB_H    = Screen:scaleBySize(52)
+    self._PAGER_H  = Screen:scaleBySize(28)
+    self._PAD      = Screen:scaleBySize(14)
+    self._ROW_H    = Screen:scaleBySize(44)
+    self._DIV_H    = Screen:scaleBySize(1)
+
     local sw = Screen:getWidth()
     local sh = Screen:getHeight()
-
     self.dimen = Geom:new{ w = sw, h = sh }
 
     for _, t in ipairs(TABS) do
@@ -97,6 +73,19 @@ function HomeScreen:init()
     self.key_events = { Back = { {"Back"}, action = "back" } }
     self:_build()
     UIManager:setDirty(self, "full")
+end
+
+function HomeScreen:_F(size)
+    return Font:getFace("cfont", size)
+end
+
+function HomeScreen:_divider(width)
+    return FrameContainer:new{
+        width      = width,
+        height     = self._DIV_H,
+        bordersize = 0,
+        background = self._C.border,
+    }
 end
 
 function HomeScreen:onBack()
@@ -126,11 +115,14 @@ end
 
 -- ── Build ─────────────────────────────────────────────────────────────────────
 function HomeScreen:_build()
+    local Screen = self._S
+    local C = self._C
     local sw = Screen:getWidth()
     local sh = Screen:getHeight()
     local ps = self.tab_pages[self.current_tab]
     local show_pager = ps.total > 1
-    local content_h  = sh - STATUS_H - TAB_H - (show_pager and PAGER_H or 0)
+    local content_h  = sh - self._STATUS_H - self._TAB_H
+                       - (show_pager and self._PAGER_H or 0)
 
     local layout = VerticalGroup:new{ align = "left" }
     layout[#layout+1] = self:_statusBar(sw)
@@ -152,6 +144,7 @@ end
 
 -- ── Status bar ────────────────────────────────────────────────────────────────
 function HomeScreen:_statusBar(sw)
+    local C = self._C
     local time = os.date("%H:%M")
     local date = os.date("%a %d %b")
     local batt = ""
@@ -165,15 +158,15 @@ function HomeScreen:_statusBar(sw)
 
     return FrameContainer:new{
         width      = sw,
-        height     = STATUS_H,
+        height     = self._STATUS_H,
         bordersize = 0,
         padding    = 0,
         background = C.statusBg,
         CenterContainer:new{
-            dimen = Geom:new{ w = sw, h = STATUS_H },
+            dimen = Geom:new{ w = sw, h = self._STATUS_H },
             TextWidget:new{
                 text    = time .. "  ·  " .. date .. batt,
-                face    = F(11),
+                face    = self:_F(11),
                 fgcolor = C.dim,
             },
         },
@@ -182,13 +175,15 @@ end
 
 -- ── Content area ──────────────────────────────────────────────────────────────
 function HomeScreen:_contentArea(sw, h)
+    local C = self._C
+    local PAD = self._PAD
     local inner_w = sw - PAD * 2
     local view
     if     self.current_tab == "home"    then view = self:_homeView(inner_w, h)
     elseif self.current_tab == "library" then view = self:_libraryView(inner_w, h)
     elseif self.current_tab == "goals"   then view = self:_goalsView(inner_w, h)
     elseif self.current_tab == "more"    then view = self:_moreView(inner_w, h)
-    else   view = TextWidget:new{ text = "", face = F(12) }
+    else   view = TextWidget:new{ text = "", face = self:_F(12) }
     end
 
     return FrameContainer:new{
@@ -206,12 +201,13 @@ end
 
 -- ── Pager bar ─────────────────────────────────────────────────────────────────
 function HomeScreen:_pagerBar(sw)
+    local C = self._C
     local ps   = self.tab_pages[self.current_tab]
     local col3 = math.floor(sw / 3)
 
     return FrameContainer:new{
         width      = sw,
-        height     = PAGER_H,
+        height     = self._PAGER_H,
         bordersize = 0,
         padding    = 0,
         background = C.tabBg,
@@ -220,7 +216,7 @@ function HomeScreen:_pagerBar(sw)
             Button:new{
                 text       = "← Prev",
                 width      = col3,
-                height     = PAGER_H,
+                height     = self._PAGER_H,
                 bordersize = 0,
                 margin     = 0,
                 padding    = 0,
@@ -229,17 +225,17 @@ function HomeScreen:_pagerBar(sw)
                 callback   = function() self:changePage(-1) end,
             },
             CenterContainer:new{
-                dimen = Geom:new{ w = col3, h = PAGER_H },
+                dimen = Geom:new{ w = col3, h = self._PAGER_H },
                 TextWidget:new{
                     text    = ps.page .. " / " .. ps.total,
-                    face    = F(11),
+                    face    = self:_F(11),
                     fgcolor = C.dim,
                 },
             },
             Button:new{
                 text       = "Next →",
                 width      = col3,
-                height     = PAGER_H,
+                height     = self._PAGER_H,
                 bordersize = 0,
                 margin     = 0,
                 padding    = 0,
@@ -253,6 +249,8 @@ end
 
 -- ── Tab bar ───────────────────────────────────────────────────────────────────
 function HomeScreen:_tabBar(sw)
+    local Screen = self._S
+    local C = self._C
     local tab_w = math.floor(sw / #TABS)
     local row   = HorizontalGroup:new{ align = "left" }
     for _, tab in ipairs(TABS) do
@@ -260,7 +258,7 @@ function HomeScreen:_tabBar(sw)
         row[#row+1] = Button:new{
             text           = tab.label,
             width          = tab_w,
-            height         = TAB_H,
+            height         = self._TAB_H,
             margin         = 0,
             bordersize     = 0,
             padding        = 0,
@@ -273,13 +271,13 @@ function HomeScreen:_tabBar(sw)
     end
     return FrameContainer:new{
         width      = sw,
-        height     = TAB_H,
+        height     = self._TAB_H,
         bordersize = 0,
         padding    = 0,
         background = C.tabBg,
         VerticalGroup:new{
             align = "left",
-            divider(sw),
+            self:_divider(sw),
             row,
         },
     }
@@ -289,6 +287,8 @@ end
 --  VIEW: HOME
 -- ═══════════════════════════════════════════════════════════════════════════════
 function HomeScreen:_homeView(w, h)
+    local Screen = self._S
+    local C = self._C
     local vg = VerticalGroup:new{ align = "left" }
 
     -- Greeting
@@ -303,10 +303,10 @@ function HomeScreen:_homeView(w, h)
     }
     vg[#vg+1] = TextWidget:new{
         text    = os.date("%A, %d %B %Y"),
-        face    = F(12),
+        face    = self:_F(12),
         fgcolor = C.dim,
     }
-    vg[#vg+1] = divider(w)
+    vg[#vg+1] = self:_divider(w)
 
     -- Currently reading
     local ReadHistory = lazy("readhistory")
@@ -331,33 +331,32 @@ function HomeScreen:_homeView(w, h)
             end)
         end
 
-        -- Book card
         vg[#vg+1] = FrameContainer:new{
             width        = w,
-            bordersize   = DIV_H,
+            bordersize   = self._DIV_H,
             border_color = C.border,
             background   = C.surface,
             padding      = Screen:scaleBySize(10),
             VerticalGroup:new{
                 align = "left",
-                TextWidget:new{ text = "Currently reading", face = F(10), fgcolor = C.dim },
+                TextWidget:new{ text = "Currently reading", face = self:_F(10), fgcolor = C.dim },
                 TextWidget:new{
                     text      = title,
-                    face      = F(14),
+                    face      = self:_F(14),
                     fgcolor   = C.black,
                     bold      = true,
                     max_width = w - Screen:scaleBySize(20),
                 },
                 TextWidget:new{
                     text    = pct .. "% complete",
-                    face    = F(11),
+                    face    = self:_F(11),
                     fgcolor = C.dim,
                 },
                 Button:new{
                     text       = "Continue reading",
                     width      = w - Screen:scaleBySize(20),
-                    height     = ROW_H,
-                    bordersize = DIV_H,
+                    height     = self._ROW_H,
+                    bordersize = self._DIV_H,
                     background = C.paper,
                     callback   = function()
                         if item.file then
@@ -375,7 +374,7 @@ function HomeScreen:_homeView(w, h)
             dimen = Geom:new{ w = w, h = Screen:scaleBySize(80) },
             TextWidget:new{
                 text    = "No books opened yet.  Browse Files to start.",
-                face    = F(13),
+                face    = self:_F(13),
                 fgcolor = C.dim,
             },
         }
@@ -385,7 +384,7 @@ function HomeScreen:_homeView(w, h)
     if #hist > 1 then
         vg[#vg+1] = TextWidget:new{
             text    = "Recent",
-            face    = F(10),
+            face    = self:_F(10),
             fgcolor = C.dim,
         }
         for i = 2, math.min(#hist, 5) do
@@ -393,7 +392,7 @@ function HomeScreen:_homeView(w, h)
             vg[#vg+1] = Button:new{
                 text           = item.text or "Unknown",
                 width          = w,
-                height         = ROW_H,
+                height         = self._ROW_H,
                 bordersize     = 0,
                 margin         = 0,
                 padding        = 0,
@@ -410,7 +409,7 @@ function HomeScreen:_homeView(w, h)
                     end
                 end,
             }
-            vg[#vg+1] = divider(w)
+            vg[#vg+1] = self:_divider(w)
         end
     end
 
@@ -421,6 +420,8 @@ end
 --  VIEW: LIBRARY
 -- ═══════════════════════════════════════════════════════════════════════════════
 function HomeScreen:_libraryView(w, h)
+    local Screen = self._S
+    local C = self._C
     local ReadHistory = lazy("readhistory")
     local hist = {}
     if ReadHistory then
@@ -428,7 +429,7 @@ function HomeScreen:_libraryView(w, h)
         hist = ReadHistory.hist or {}
     end
 
-    local rows_pp = math.max(1, math.floor((h - PAD) / ROW_H))
+    local rows_pp = math.max(1, math.floor((h - self._PAD) / self._ROW_H))
     local ps      = self.tab_pages["library"]
     ps.total      = math.max(1, math.ceil(#hist / rows_pp))
     local offset  = (ps.page - 1) * rows_pp
@@ -436,17 +437,17 @@ function HomeScreen:_libraryView(w, h)
     local vg = VerticalGroup:new{ align = "left" }
     vg[#vg+1] = TextWidget:new{
         text    = "Library  —  " .. #hist .. " books",
-        face    = F(12),
+        face    = self:_F(12),
         fgcolor = C.dim,
     }
-    vg[#vg+1] = divider(w)
+    vg[#vg+1] = self:_divider(w)
 
     if #hist == 0 then
         vg[#vg+1] = CenterContainer:new{
             dimen = Geom:new{ w = w, h = h - Screen:scaleBySize(40) },
             TextWidget:new{
                 text    = "Your library is empty.\nOpen a book via Files to get started.",
-                face    = F(13),
+                face    = self:_F(13),
                 fgcolor = C.dim,
             },
         }
@@ -468,7 +469,7 @@ function HomeScreen:_libraryView(w, h)
         vg[#vg+1] = Button:new{
             text           = (item.text or "Unknown") .. "  [" .. pct .. "%]",
             width          = w,
-            height         = ROW_H,
+            height         = self._ROW_H,
             bordersize     = 0,
             margin         = 0,
             padding        = 0,
@@ -485,7 +486,7 @@ function HomeScreen:_libraryView(w, h)
                 end
             end,
         }
-        vg[#vg+1] = divider(w)
+        vg[#vg+1] = self:_divider(w)
     end
     return vg
 end
@@ -494,10 +495,11 @@ end
 --  VIEW: GOALS
 -- ═══════════════════════════════════════════════════════════════════════════════
 function HomeScreen:_goalsView(w, h)
+    local C = self._C
     local vg = VerticalGroup:new{ align = "left" }
 
-    vg[#vg+1] = TextWidget:new{ text = "Reading Goals", face = F(16), fgcolor = C.black, bold = true }
-    vg[#vg+1] = divider(w)
+    vg[#vg+1] = TextWidget:new{ text = "Reading Goals", face = self:_F(16), fgcolor = C.black, bold = true }
+    vg[#vg+1] = self:_divider(w)
 
     local ReadHistory = lazy("readhistory")
     local hist = {}
@@ -527,7 +529,7 @@ function HomeScreen:_goalsView(w, h)
     for _, s in ipairs(stats) do
         vg[#vg+1] = FrameContainer:new{
             width      = w,
-            height     = ROW_H,
+            height     = self._ROW_H,
             bordersize = 0,
             padding    = 0,
             background = C.paper,
@@ -535,26 +537,26 @@ function HomeScreen:_goalsView(w, h)
                 align = "center",
                 FrameContainer:new{
                     width        = col_a,
-                    height       = ROW_H,
+                    height       = self._ROW_H,
                     bordersize   = 0,
-                    padding_left = PAD,
+                    padding_left = self._PAD,
                     CenterContainer:new{
-                        dimen = Geom:new{ w = col_a - PAD, h = ROW_H },
-                        TextWidget:new{ text = s.label, face = F(13), fgcolor = C.black },
+                        dimen = Geom:new{ w = col_a - self._PAD, h = self._ROW_H },
+                        TextWidget:new{ text = s.label, face = self:_F(13), fgcolor = C.black },
                     },
                 },
                 CenterContainer:new{
-                    dimen = Geom:new{ w = col_b, h = ROW_H },
-                    TextWidget:new{ text = s.value, face = F(14), fgcolor = C.black, bold = true },
+                    dimen = Geom:new{ w = col_b, h = self._ROW_H },
+                    TextWidget:new{ text = s.value, face = self:_F(14), fgcolor = C.black, bold = true },
                 },
             },
         }
-        vg[#vg+1] = divider(w)
+        vg[#vg+1] = self:_divider(w)
     end
 
     vg[#vg+1] = TextWidget:new{
         text    = "Enable the Statistics plugin for detailed data.",
-        face    = F(11),
+        face    = self:_F(11),
         fgcolor = C.dim,
     }
     return vg
@@ -564,21 +566,23 @@ end
 --  VIEW: MORE
 -- ═══════════════════════════════════════════════════════════════════════════════
 function HomeScreen:_moreView(w, h)
+    local Screen = self._S
+    local C = self._C
     local vg = VerticalGroup:new{ align = "left" }
-    vg[#vg+1] = TextWidget:new{ text = "More", face = F(16), fgcolor = C.black, bold = true }
-    vg[#vg+1] = divider(w)
+    vg[#vg+1] = TextWidget:new{ text = "More", face = self:_F(16), fgcolor = C.black, bold = true }
+    vg[#vg+1] = self:_divider(w)
 
     local entries = {
-        { label = "OPDS Browser",       action = function() self:_act_opds()       end },
-        { label = "KOSync Settings",    action = function() self:_act_kosync()     end },
-        { label = "Statistics",         action = function() self:_act_stats()      end },
-        { label = "Search",             action = function() self:_act_search()     end },
-        { label = "Reader Settings",    action = function() self:_act_settings()   end },
-        { label = "Plugins",            action = function() self:_act_plugins()    end },
-        { label = "About KOReader",     action = function() self:_act_about()      end },
+        { label = "OPDS Browser",       action = function() self:_act_opds()     end },
+        { label = "KOSync Settings",    action = function() self:_act_kosync()   end },
+        { label = "Statistics",         action = function() self:_act_stats()    end },
+        { label = "Search",             action = function() self:_act_search()   end },
+        { label = "Reader Settings",    action = function() self:_act_settings() end },
+        { label = "Plugins",            action = function() self:_act_plugins()  end },
+        { label = "About KOReader",     action = function() self:_act_about()    end },
     }
 
-    local rows_pp = math.max(1, math.floor((h - Screen:scaleBySize(50)) / ROW_H))
+    local rows_pp = math.max(1, math.floor((h - Screen:scaleBySize(50)) / self._ROW_H))
     local ps      = self.tab_pages["more"]
     ps.total      = math.max(1, math.ceil(#entries / rows_pp))
     local offset  = (ps.page - 1) * rows_pp
@@ -588,7 +592,7 @@ function HomeScreen:_moreView(w, h)
         vg[#vg+1] = Button:new{
             text           = e.label,
             width          = w,
-            height         = ROW_H,
+            height         = self._ROW_H,
             bordersize     = 0,
             margin         = 0,
             padding        = 0,
@@ -598,7 +602,7 @@ function HomeScreen:_moreView(w, h)
             align          = "left",
             callback       = e.action,
         }
-        vg[#vg+1] = divider(w)
+        vg[#vg+1] = self:_divider(w)
     end
     return vg
 end
@@ -610,13 +614,7 @@ local function info(msg)
 end
 
 function HomeScreen:_act_opds()
-    local ok, OB = pcall(require, "apps/filemanager/filemanageropds")
-    if ok and OB then
-        UIManager:close(self)
-        UIManager:show(OB:new{})
-    else
-        info("OPDS Browser not available on this build.")
-    end
+    info("OPDS Browser:\nMain Menu → OPDS catalog")
 end
 
 function HomeScreen:_act_kosync()
@@ -638,9 +636,6 @@ end
 
 function HomeScreen:_act_settings()
     UIManager:close(self)
-    if self.filemanager and self.filemanager.onShowConfigWidget then
-        self.filemanager:onShowConfigWidget()
-    end
 end
 
 function HomeScreen:_act_plugins()
@@ -648,9 +643,7 @@ function HomeScreen:_act_plugins()
 end
 
 function HomeScreen:_act_about()
-    local ok, AB = pcall(require, "ui/widget/about")
-    if ok then UIManager:show(AB:new{})
-    else info("About:\nMain Menu → Help → About KOReader") end
+    info("About:\nMain Menu → Help → About KOReader")
 end
 
 return HomeScreen
