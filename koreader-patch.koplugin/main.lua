@@ -1,7 +1,8 @@
 -- main.lua — KOReader Patch
--- Plugin entry point. Minimal version for debugging.
+-- Plugin entry point.
 
 local WidgetContainer = require("ui/widget/container/widgetcontainer")
+local UIManager       = require("ui/uimanager")
 local logger          = require("logger")
 local _               = require("gettext")
 
@@ -11,9 +12,6 @@ local KOReaderPatch = WidgetContainer:new{
 }
 
 function KOReaderPatch:init()
-    logger.info("koreader-patch: init called")
-
-    -- Register menu only — no auto-show, no homescreen loading.
     local ok, err = pcall(function()
         self.ui.menu:registerToMainMenu(self)
     end)
@@ -28,16 +26,33 @@ function KOReaderPatch:addToMainMenu(menu_items)
         sub_item_table = {
             {
                 text     = _("Open Home Screen"),
-                callback = function()
-                    local UIManager = require("ui/uimanager")
-                    local InfoMessage = require("ui/widget/infomessage")
-                    UIManager:show(InfoMessage:new{
-                        text = "KOReader Patch is alive!",
-                    })
-                end,
+                callback = function() self:showHomeScreen() end,
             },
         },
     }
+end
+
+function KOReaderPatch:showHomeScreen()
+    local ok, HomeScreen = pcall(require, "homescreen")
+    if not ok then
+        local InfoMessage = require("ui/widget/infomessage")
+        UIManager:show(InfoMessage:new{
+            text = "Failed to load homescreen:\n\n" .. tostring(HomeScreen),
+        })
+        return
+    end
+    local ok2, err2 = pcall(function()
+        UIManager:show(HomeScreen:new{
+            plugin      = self,
+            filemanager = self.ui,
+        })
+    end)
+    if not ok2 then
+        local InfoMessage = require("ui/widget/infomessage")
+        UIManager:show(InfoMessage:new{
+            text = "Failed to show homescreen:\n\n" .. tostring(err2),
+        })
+    end
 end
 
 return KOReaderPatch
