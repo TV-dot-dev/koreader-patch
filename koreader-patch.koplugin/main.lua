@@ -25,12 +25,18 @@ local KOReaderPatch = WidgetContainer:extend{
 
 -- ── init ─────────────────────────────────────────────────────────────────────
 function KOReaderPatch:init()
-    -- Guard: only run once, and ONLY in the FileManager context.
-    -- Both FileManager and ReaderUI expose self.ui.menu, but only
-    -- FileManager exposes self.ui.file_chooser — use that to distinguish.
+    -- Guard: only run once.
     if self._ready then return end
     self._ready = true
-    if not (self.ui and self.ui.file_chooser) then return end
+
+    -- Only run in the FileManager context.
+    -- ReaderUI always has self.ui.document (the open book object).
+    -- FileManager never has it. This is the most reliable way to distinguish
+    -- the two contexts — more reliable than checking for file_chooser, which
+    -- may not be assigned yet when plugins are initialised.
+    if not self.ui then return end
+    if self.ui.document then return end  -- we're inside a book, skip
+    if not self.ui.menu   then return end  -- no menu to attach to, skip
 
     self.ui.menu:registerToMainMenu(self)
 
