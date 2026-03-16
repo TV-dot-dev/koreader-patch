@@ -5,14 +5,9 @@
     "KOReader Patch" sub-menu to the main ☰ menu.
 --]]
 
--- ── Package path: ensure homescreen.lua can always be found ───────────────────
--- KOReader's async scheduler can lose the plugin dir from package.path, so we
--- pin it explicitly using the path of *this* file.
-local _src = debug.getinfo(1, "S").source
-local _dir = _src:match("^@?(.+)/[^/]*$") or "."
-if not package.path:find(_dir, 1, true) then
-    package.path = _dir .. "/?.lua;" .. package.path
-end
+-- Resolve this plugin's directory from the source path of this file.
+-- Used to loadfile() homescreen.lua without polluting global package.path.
+local _plugin_dir = debug.getinfo(1, "S").source:match("^@?(.+)/[^/]*$") or "."
 
 local WidgetContainer = require("ui/widget/container/widgetcontainer")
 local UIManager       = require("ui/uimanager")
@@ -73,18 +68,36 @@ function KOReaderPatch:addToMainMenu(menu_items)
 end
 
 -- ── Show home screen ──────────────────────────────────────────────────────────
+-- Cache the loaded HomeScreen class so we only loadfile() once.
+local _HomeScreen
+
 function KOReaderPatch:showHomeScreen()
-    -- Use pcall so any error in homescreen.lua surfaces as a readable message
-    -- rather than silently crashing.
-    local ok, result = pcall(require, "homescreen")
-    if not ok then
-        local InfoMessage = require("ui/widget/infomessage")
-        UIManager:show(InfoMessage:new{
-            text = "KOReader Patch — failed to load home screen:\n\n" .. tostring(result),
-        })
-        return
+    if not _HomeScreen then
+        -- Use the plugin's own directory (self.path is set by KOReader, fall
+        -- back to the path we resolved at load time).
+        local dir = self.path or _plugin_dir
+        local path = dir .. "/homescreen.lua"
+        local chunk, load_err = loadfile(path)
+        if not chunk then
+            local InfoMessage = require("ui/widget/infomessage")
+            UIManager:show(InfoMessage:new{
+                text = "KOReader Patch — cannot load homescreen.lua:\n\n"
+                       .. tostring(load_err),
+            })
+            return
+        end
+        local ok, result = pcall(chunk)
+        if not ok then
+            local InfoMessage = require("ui/widget/infomessage")
+            UIManager:show(InfoMessage:new{
+                text = "KOReader Patch — error in homescreen.lua:\n\n"
+                       .. tostring(result),
+            })
+            return
+        end
+        _HomeScreen = result
     end
-    UIManager:show(result:new{
+    UIManager:show(_HomeScreen:new{
         plugin      = self,
         filemanager = self.ui,
     })
