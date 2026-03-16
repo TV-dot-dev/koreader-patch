@@ -34,15 +34,17 @@ function KOReaderPatch:addToMainMenu(menu_items)
 end
 
 function KOReaderPatch:showHomeScreen()
-    -- Everything inline — no separate file, no module loading.
-    local Device         = require("device")
-    local Screen         = Device.screen
-    local Geom           = require("ui/geometry")
-    local Font           = require("ui/font")
-    local InputContainer = require("ui/widget/container/inputcontainer")
-    local FrameContainer = require("ui/widget/container/framecontainer")
+    local Blitbuffer      = require("ffi/blitbuffer")
+    local Device          = require("device")
+    local Screen          = Device.screen
+    local Geom            = require("ui/geometry")
+    local Font            = require("ui/font")
+    local InputContainer  = require("ui/widget/container/inputcontainer")
+    local FrameContainer  = require("ui/widget/container/framecontainer")
     local CenterContainer = require("ui/widget/container/centercontainer")
-    local TextWidget     = require("ui/widget/textwidget")
+    local TextWidget      = require("ui/widget/textwidget")
+    local Button          = require("ui/widget/button")
+    local VerticalGroup   = require("ui/widget/verticalgroup")
 
     local sw = Screen:getWidth()
     local sh = Screen:getHeight()
@@ -53,16 +55,29 @@ function KOReaderPatch:showHomeScreen()
         dimen             = Geom:new{ w = sw, h = sh },
     }
 
+    -- Back button key event
+    widget.key_events = { Back = { {"Back"}, action = "back" } }
+
     widget[1] = FrameContainer:new{
         width      = sw,
         height     = sh,
         bordersize = 0,
         padding    = 0,
+        background = Blitbuffer.COLOR_WHITE,
         CenterContainer:new{
             dimen = Geom:new{ w = sw, h = sh },
-            TextWidget:new{
-                text = "Hello from KOReader Patch!",
-                face = Font:getFace("cfont", 20),
+            VerticalGroup:new{
+                align = "center",
+                TextWidget:new{
+                    text = "Hello from KOReader Patch!",
+                    face = Font:getFace("cfont", 20),
+                },
+                Button:new{
+                    text     = "Close",
+                    callback = function()
+                        UIManager:close(widget)
+                    end,
+                },
             },
         },
     }
@@ -72,7 +87,12 @@ function KOReaderPatch:showHomeScreen()
         return true
     end
 
+    -- Swallow all taps so they don't pass through to file browser
+    function widget:onTap() return true end
+    function widget:onSwipe() return true end
+
     UIManager:show(widget)
+    UIManager:setDirty(widget, "full")
 end
 
 return KOReaderPatch
