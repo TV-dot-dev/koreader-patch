@@ -1,5 +1,6 @@
 -- main.lua — KOReader Patch
--- Plugin entry point.
+-- Minimal test: show a fullscreen widget directly from main.lua.
+-- No separate files, no external requires beyond core KOReader modules.
 
 local WidgetContainer = require("ui/widget/container/widgetcontainer")
 local UIManager       = require("ui/uimanager")
@@ -33,26 +34,45 @@ function KOReaderPatch:addToMainMenu(menu_items)
 end
 
 function KOReaderPatch:showHomeScreen()
-    local ok, HomeScreen = pcall(require, "koreader_patch_homescreen")
-    if not ok then
-        local InfoMessage = require("ui/widget/infomessage")
-        UIManager:show(InfoMessage:new{
-            text = "Failed to load homescreen:\n\n" .. tostring(HomeScreen),
-        })
-        return
+    -- Everything inline — no separate file, no module loading.
+    local Device         = require("device")
+    local Screen         = Device.screen
+    local Geom           = require("ui/geometry")
+    local Font           = require("ui/font")
+    local InputContainer = require("ui/widget/container/inputcontainer")
+    local FrameContainer = require("ui/widget/container/framecontainer")
+    local CenterContainer = require("ui/widget/container/centercontainer")
+    local TextWidget     = require("ui/widget/textwidget")
+
+    local sw = Screen:getWidth()
+    local sh = Screen:getHeight()
+
+    local widget = InputContainer:new{
+        name              = "KPatchHome",
+        covers_fullscreen = true,
+        dimen             = Geom:new{ w = sw, h = sh },
+    }
+
+    widget[1] = FrameContainer:new{
+        width      = sw,
+        height     = sh,
+        bordersize = 0,
+        padding    = 0,
+        CenterContainer:new{
+            dimen = Geom:new{ w = sw, h = sh },
+            TextWidget:new{
+                text = "Hello from KOReader Patch!",
+                face = Font:getFace("cfont", 20),
+            },
+        },
+    }
+
+    function widget:onBack()
+        UIManager:close(self)
+        return true
     end
-    local ok2, err2 = pcall(function()
-        UIManager:show(HomeScreen:new{
-            plugin      = self,
-            filemanager = self.ui,
-        })
-    end)
-    if not ok2 then
-        local InfoMessage = require("ui/widget/infomessage")
-        UIManager:show(InfoMessage:new{
-            text = "Failed to show homescreen:\n\n" .. tostring(err2),
-        })
-    end
+
+    UIManager:show(widget)
 end
 
 return KOReaderPatch
