@@ -16,7 +16,9 @@ local KOReaderPatch = WidgetContainer:extend{
 
 -- ── init ─────────────────────────────────────────────────────────────────────
 function KOReaderPatch:init()
-    -- Guard: only run in FileManager context (not inside a book)
+    -- Guard: only run once, and only in FileManager context
+    if self._ready then return end
+    self._ready = true
     if not (self.ui and self.ui.menu) then return end
 
     self.ui.menu:registerToMainMenu(self)
