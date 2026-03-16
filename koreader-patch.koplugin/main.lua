@@ -1,77 +1,94 @@
 --[[
     KOReader Patch — main.lua
-    Plugin entry point. Hooks into FileManager startup and registers
-    menu items under the main KOReader menu.
+    Plugin entry point. Uses WidgetContainer as the base class (safe across
+    all KOReader versions). Hooks into FileManager startup and adds a
+    "KOReader Patch" sub-menu to the main ☰ menu.
 --]]
 
-local Plugin          = require("Plugin")
+local WidgetContainer = require("ui/widget/container/widgetcontainer")
 local UIManager       = require("ui/uimanager")
-local LuaSettings     = require("luasettings")
-local DataStorage     = require("datastorage")
 local _               = require("gettext")
 
-local KOReaderPatch = Plugin:extend{
-    name         = "koreader-patch",
-    fullname     = "KOReader Patch",
-    description  = "Refined home screen with tab navigation",
-    version      = 1,
-    is_doc_only  = false,
+local KOReaderPatch = WidgetContainer:extend{
+    name     = "koreader-patch",
+    fullname = "KOReader Patch",
 }
 
 -- ── init ─────────────────────────────────────────────────────────────────────
 function KOReaderPatch:init()
-    -- Persistent settings (stored in koreader/settings/koreader-patch.lua)
-    self.settings = LuaSettings:open(
-        DataStorage:getSettingsDir() .. "/koreader-patch.lua"
-    )
+    -- Guard: only run in FileManager context (not inside a book)
+    if not (self.ui and self.ui.menu) then return end
 
     self.ui.menu:registerToMainMenu(self)
 
-    -- Auto-show on startup only when the setting is on (default: on)
-    if self:_autoshow() then
-        UIManager:scheduleIn(0, function()
+    -- Auto-show on startup (deferred so FileManager finishes its own init first)
+    UIManager:scheduleIn(0, function()
+        if self:_autoshow() then
             self:showHomeScreen()
-        end)
-    end
+        end
+    end)
 end
 
--- ── Menu ─────────────────────────────────────────────────────────────────────
+-- ── Main menu entry ───────────────────────────────────────────────────────────
 function KOReaderPatch:addToMainMenu(menu_items)
     menu_items.koreader_patch = {
         text = _("KOReader Patch"),
         sub_item_table = {
             {
                 text     = _("Open Home Screen"),
-                callback = function()
-                    self:showHomeScreen()
-                end,
+                callback = function() self:showHomeScreen() end,
             },
             {
-                text           = _("Show Home Screen on startup"),
-                checked_func   = function() return self:_autoshow() end,
-                callback       = function()
-                    self.settings:saveSetting("autoshow", not self:_autoshow())
-                    self.settings:flush()
+                text         = _("Show Home Screen on startup"),
+                checked_func = function() return self:_autoshow() end,
+                callback     = function()
+                    local s = self:_settings()
+                    if s then
+                        s:saveSetting("autoshow", not self:_autoshow())
+                        s:flush()
+                    end
                 end,
             },
         },
     }
 end
 
--- ── Helpers ───────────────────────────────────────────────────────────────────
-function KOReaderPatch:_autoshow()
-    -- Default to true (on) when the setting has never been saved
-    local v = self.settings:readSetting("autoshow")
-    if v == nil then return true end
-    return v
-end
-
+-- ── Show home screen ──────────────────────────────────────────────────────────
 function KOReaderPatch:showHomeScreen()
-    local HomeScreen = require("homescreen")
-    UIManager:show(HomeScreen:new{
+    -- Use pcall so any error in homescreen.lua surfaces as a readable message
+    -- rather than silently crashing.
+    local ok, result = pcall(require, "homescreen")
+    if not ok then
+        local InfoMessage = require("ui/widget/infomessage")
+        UIManager:show(InfoMessage:new{
+            text = "KOReader Patch — failed to load home screen:\n\n" .. tostring(result),
+        })
+        return
+    end
+    UIManager:show(result:new{
         plugin      = self,
         filemanager = self.ui,
     })
+end
+
+-- ── Persistent settings ───────────────────────────────────────────────────────
+function KOReaderPatch:_settings()
+    if self._s then return self._s end
+    local ok1, LuaSettings = pcall(require, "luasettings")
+    local ok2, DataStorage  = pcall(require, "datastorage")
+    if ok1 and ok2 then
+        self._s = LuaSettings:open(
+            DataStorage:getSettingsDir() .. "/koreader-patch.lua"
+        )
+    end
+    return self._s
+end
+
+function KOReaderPatch:_autoshow()
+    local s = self:_settings()
+    if not s then return true end
+    local v = s:readSetting("autoshow")
+    return (v == nil) and true or v
 end
 
 return KOReaderPatch

@@ -18,7 +18,8 @@
 local InputContainer  = require("ui/widget/container/inputcontainer")
 local FrameContainer  = require("ui/widget/container/framecontainer")
 local CenterContainer = require("ui/widget/container/centercontainer")
-local LeftContainer   = require("ui/widget/container/leftcontainer")
+local ok_lc, LeftContainer = pcall(require, "ui/widget/container/leftcontainer")
+if not ok_lc then LeftContainer = CenterContainer end  -- fallback if not present
 local VerticalGroup   = require("ui/widget/verticalgroup")
 local HorizontalGroup = require("ui/widget/horizontalgroup")
 local TextWidget      = require("ui/widget/textwidget")
@@ -33,7 +34,8 @@ local Blitbuffer      = require("ffi/blitbuffer")
 local Device          = require("device")
 local ReadHistory     = require("readhistory")
 local DocSettings     = require("docsettings")
-local lfs             = require("libs/libkoreader-lfs")
+local ok_lfs, lfs = pcall(require, "libs/libkoreader-lfs")
+if not ok_lfs then _, lfs = pcall(require, "lfs") end
 local _               = require("gettext")
 
 -- ── Colour helpers ───────────────────────────────────────────────────────────
@@ -314,7 +316,7 @@ function HomeScreen:_homeView(w, h)
 
     table.insert(vg, TextWidget:new{
         text    = greeting,
-        face    = Font:getFace("Georgia,Palatino", Screen:scaleBySize(18)) or F(18),
+        face    = Font:getFace("tfont", Screen:scaleBySize(18)),
         fgcolor = C.black,
         bold    = false,
     })
