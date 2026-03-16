@@ -1,52 +1,77 @@
 --[[
     KOReader Patch — main.lua
     Plugin entry point. Hooks into FileManager startup and registers
-    a "Home Screen" menu item under the main KOReader menu.
+    menu items under the main KOReader menu.
 --]]
 
-local Plugin     = require("Plugin")
-local UIManager  = require("ui/uimanager")
-local _          = require("gettext")
+local Plugin          = require("Plugin")
+local UIManager       = require("ui/uimanager")
+local LuaSettings     = require("luasettings")
+local DataStorage     = require("datastorage")
+local _               = require("gettext")
 
 local KOReaderPatch = Plugin:extend{
     name         = "koreader-patch",
     fullname     = "KOReader Patch",
     description  = "Refined home screen with tab navigation",
     version      = 1,
-    is_doc_only  = false,   -- runs in both FileManager and Reader contexts
+    is_doc_only  = false,
 }
 
--- Called once when the plugin loads in FileManager context.
+-- ── init ─────────────────────────────────────────────────────────────────────
 function KOReaderPatch:init()
-    -- Register menu item so the user can re-open the home screen at any time.
+    -- Persistent settings (stored in koreader/settings/koreader-patch.lua)
+    self.settings = LuaSettings:open(
+        DataStorage:getSettingsDir() .. "/koreader-patch.lua"
+    )
+
     self.ui.menu:registerToMainMenu(self)
 
-    -- Show the home screen automatically on first startup.
-    -- scheduleIn(0) defers until after FileManager finishes its own init().
-    UIManager:scheduleIn(0, function()
-        self:showHomeScreen()
-    end)
-end
-
--- Adds "Home Screen" to KOReader's main ☰ menu.
-function KOReaderPatch:addToMainMenu(menu_items)
-    menu_items.koreader_patch_home = {
-        text     = _("Home Screen"),
-        callback = function()
+    -- Auto-show on startup only when the setting is on (default: on)
+    if self:_autoshow() then
+        UIManager:scheduleIn(0, function()
             self:showHomeScreen()
-        end,
+        end)
+    end
+end
+
+-- ── Menu ─────────────────────────────────────────────────────────────────────
+function KOReaderPatch:addToMainMenu(menu_items)
+    menu_items.koreader_patch = {
+        text = _("KOReader Patch"),
+        sub_item_table = {
+            {
+                text     = _("Open Home Screen"),
+                callback = function()
+                    self:showHomeScreen()
+                end,
+            },
+            {
+                text           = _("Show Home Screen on startup"),
+                checked_func   = function() return self:_autoshow() end,
+                callback       = function()
+                    self.settings:saveSetting("autoshow", not self:_autoshow())
+                    self.settings:flush()
+                end,
+            },
+        },
     }
 end
 
--- Lazily creates and shows the HomeScreen widget.
+-- ── Helpers ───────────────────────────────────────────────────────────────────
+function KOReaderPatch:_autoshow()
+    -- Default to true (on) when the setting has never been saved
+    local v = self.settings:readSetting("autoshow")
+    if v == nil then return true end
+    return v
+end
+
 function KOReaderPatch:showHomeScreen()
-    -- Always create fresh so data (history, stats) is current.
     local HomeScreen = require("homescreen")
-    local screen = HomeScreen:new{
-        plugin     = self,
+    UIManager:show(HomeScreen:new{
+        plugin      = self,
         filemanager = self.ui,
-    }
-    UIManager:show(screen)
+    })
 end
 
 return KOReaderPatch
