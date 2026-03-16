@@ -1,48 +1,26 @@
---[[
-    KOReader Patch — homescreen.lua
+-- homescreen.lua — KOReader Patch
+-- Full-screen HomeScreen widget with tab navigation.
 
-    Full-screen HomeScreen widget.  Layout (top→bottom):
-        ┌─────────────────────────┐
-        │  Status bar  (28 px)    │
-        ├─────────────────────────┤
-        │  Content area (flex)    │
-        ├─────────────────────────┤
-        │  Pager bar   (28 px)    │  shown only when a view has >1 page
-        ├─────────────────────────┤
-        │  Tab bar     (52 px)    │
-        └─────────────────────────┘
-
-    Views:  home · library · files · goals · more
-
-    Design principle: only the six modules below are required at the top
-    level; everything else is loaded lazily inside the functions that need
-    it, wrapped in pcall, so a missing module degrades gracefully rather
-    than crashing the whole screen.
---]]
-
--- ── Core requires (guaranteed present in every KOReader build) ────────────────
-local InputContainer  = require("ui/widget/container/inputcontainer")
-local FrameContainer  = require("ui/widget/container/framecontainer")
-local CenterContainer = require("ui/widget/container/centercontainer")
-local VerticalGroup   = require("ui/widget/verticalgroup")
-local HorizontalGroup = require("ui/widget/horizontalgroup")
-local TextWidget      = require("ui/widget/textwidget")
+local Blitbuffer      = require("ffi/blitbuffer")
 local Button          = require("ui/widget/button")
-local UIManager       = require("ui/uimanager")
+local CenterContainer = require("ui/widget/container/centercontainer")
 local Device          = require("device")
 local Font            = require("ui/font")
+local FrameContainer  = require("ui/widget/container/framecontainer")
 local Geom            = require("ui/geometry")
-local Blitbuffer      = require("ffi/blitbuffer")
+local HorizontalGroup = require("ui/widget/horizontalgroup")
+local InputContainer  = require("ui/widget/container/inputcontainer")
+local TextWidget      = require("ui/widget/textwidget")
+local UIManager       = require("ui/uimanager")
+local VerticalGroup   = require("ui/widget/verticalgroup")
+local logger          = require("logger")
 local _               = require("gettext")
 
--- ── Lazy-load helpers ─────────────────────────────────────────────────────────
--- Call as:  local M = lazy("module/path")  → returns module or nil
-local function lazy(mod)
-    local ok, m = pcall(require, mod)
-    return ok and m or nil
-end
+local Screen = Device.screen
 
--- ── Colour palette ────────────────────────────────────────────────────────────
+-- ---------------------------------------------------------------------------
+-- Colour palette
+-- ---------------------------------------------------------------------------
 local C = {
     paper    = Blitbuffer.gray(0.96),
     surface  = Blitbuffer.COLOR_WHITE,
@@ -53,32 +31,21 @@ local C = {
     dim      = Blitbuffer.gray(0.45),
 }
 
--- ── Font helper ───────────────────────────────────────────────────────────────
+-- ---------------------------------------------------------------------------
+-- Layout constants — computed once at load time (Screen is available)
+-- ---------------------------------------------------------------------------
+local STATUS_H = Screen:scaleBySize(28)
+local TAB_H    = Screen:scaleBySize(52)
+local PAGER_H  = Screen:scaleBySize(28)
+local PAD      = Screen:scaleBySize(14)
+local ROW_H    = Screen:scaleBySize(44)
+local DIV_H    = Screen:scaleBySize(1)
+
 local function F(size) return Font:getFace("cfont", size) end
 
--- ── Screen & layout constants (computed lazily — Screen may not be ready at
---    require-time on Android) ─────────────────────────────────────────────────
-local Screen
-local sw, sh, STATUS_H, TAB_H, PAGER_H, PAD, ROW_H, DIV_H
-
-local function initLayout()
-    if sw then return true end                       -- already done
-    Screen = Device.screen
-    if not Screen then
-        Screen = lazy("device/screen")               -- fallback
-    end
-    if not Screen then return false end
-    sw       = Screen:getWidth()
-    sh       = Screen:getHeight()
-    STATUS_H = Screen:scaleBySize(28)
-    TAB_H    = Screen:scaleBySize(52)
-    PAGER_H  = Screen:scaleBySize(28)
-    PAD      = Screen:scaleBySize(14)
-    ROW_H    = Screen:scaleBySize(44)
-    DIV_H    = Screen:scaleBySize(1)
-    return true
-end
-
+-- ---------------------------------------------------------------------------
+-- Tabs definition
+-- ---------------------------------------------------------------------------
 local TABS = {
     { id = "home",    label = "Home"    },
     { id = "library", label = "Library" },
@@ -87,9 +54,17 @@ local TABS = {
     { id = "more",    label = "More"    },
 }
 
--- ── Widget helpers ────────────────────────────────────────────────────────────
+-- ---------------------------------------------------------------------------
+-- Lazy-load helper
+-- ---------------------------------------------------------------------------
+local function lazy(mod)
+    local ok, m = pcall(require, mod)
+    return ok and m or nil
+end
 
--- A thin horizontal rule.
+-- ---------------------------------------------------------------------------
+-- Widget helpers
+-- ---------------------------------------------------------------------------
 local function divider(width)
     return FrameContainer:new{
         width      = width,
@@ -99,28 +74,9 @@ local function divider(width)
     }
 end
 
--- A left-padded text row (used instead of LeftContainer).
-local function textRow(label, width, fsize, color)
-    return FrameContainer:new{
-        width      = width,
-        height     = ROW_H,
-        bordersize = 0,
-        padding_left = PAD,
-        background = C.paper,
-        CenterContainer:new{
-            dimen = Geom:new{ w = width - PAD, h = ROW_H },
-            TextWidget:new{
-                text    = label,
-                face    = F(fsize or 13),
-                fgcolor = color or C.black,
-            },
-        },
-    }
-end
-
--- ══════════════════════════════════════════════════════════════════════════════
---  HomeScreen class
--- ══════════════════════════════════════════════════════════════════════════════
+-- ---------------------------------------------------------------------------
+-- HomeScreen class
+-- ---------------------------------------------------------------------------
 local HomeScreen = InputContainer:extend{
     name              = "HomeScreen",
     covers_fullscreen = true,
@@ -129,10 +85,15 @@ local HomeScreen = InputContainer:extend{
 }
 
 function HomeScreen:init()
-    if not initLayout() then return end
+    local sw = Screen:getWidth()
+    local sh = Screen:getHeight()
+
+    self.dimen = Geom:new{ w = sw, h = sh }
+
     for _, t in ipairs(TABS) do
         self.tab_pages[t.id] = { page = 1, total = 1 }
     end
+
     self.key_events = { Back = { {"Back"}, action = "back" } }
     self:_build()
     UIManager:setDirty(self, "full")
@@ -165,17 +126,19 @@ end
 
 -- ── Build ─────────────────────────────────────────────────────────────────────
 function HomeScreen:_build()
-    local ps         = self.tab_pages[self.current_tab]
+    local sw = Screen:getWidth()
+    local sh = Screen:getHeight()
+    local ps = self.tab_pages[self.current_tab]
     local show_pager = ps.total > 1
     local content_h  = sh - STATUS_H - TAB_H - (show_pager and PAGER_H or 0)
 
     local layout = VerticalGroup:new{ align = "left" }
-    table.insert(layout, self:_statusBar())
-    table.insert(layout, self:_contentArea(content_h))
+    layout[#layout+1] = self:_statusBar(sw)
+    layout[#layout+1] = self:_contentArea(sw, content_h)
     if show_pager then
-        table.insert(layout, self:_pagerBar())
+        layout[#layout+1] = self:_pagerBar(sw)
     end
-    table.insert(layout, self:_tabBar())
+    layout[#layout+1] = self:_tabBar(sw)
 
     self[1] = FrameContainer:new{
         width      = sw,
@@ -185,11 +148,10 @@ function HomeScreen:_build()
         background = C.paper,
         layout,
     }
-    self.dimen = Geom:new{ x = 0, y = 0, w = sw, h = sh }
 end
 
 -- ── Status bar ────────────────────────────────────────────────────────────────
-function HomeScreen:_statusBar()
+function HomeScreen:_statusBar(sw)
     local time = os.date("%H:%M")
     local date = os.date("%a %d %b")
     local batt = ""
@@ -218,8 +180,8 @@ function HomeScreen:_statusBar()
     }
 end
 
--- ── Content area (routes to view builders) ────────────────────────────────────
-function HomeScreen:_contentArea(h)
+-- ── Content area ──────────────────────────────────────────────────────────────
+function HomeScreen:_contentArea(sw, h)
     local inner_w = sw - PAD * 2
     local view
     if     self.current_tab == "home"    then view = self:_homeView(inner_w, h)
@@ -243,7 +205,7 @@ function HomeScreen:_contentArea(h)
 end
 
 -- ── Pager bar ─────────────────────────────────────────────────────────────────
-function HomeScreen:_pagerBar()
+function HomeScreen:_pagerBar(sw)
     local ps   = self.tab_pages[self.current_tab]
     local col3 = math.floor(sw / 3)
 
@@ -290,12 +252,12 @@ function HomeScreen:_pagerBar()
 end
 
 -- ── Tab bar ───────────────────────────────────────────────────────────────────
-function HomeScreen:_tabBar()
+function HomeScreen:_tabBar(sw)
     local tab_w = math.floor(sw / #TABS)
     local row   = HorizontalGroup:new{ align = "left" }
     for _, tab in ipairs(TABS) do
         local active = (tab.id == self.current_tab)
-        table.insert(row, Button:new{
+        row[#row+1] = Button:new{
             text           = tab.label,
             width          = tab_w,
             height         = TAB_H,
@@ -307,7 +269,7 @@ function HomeScreen:_tabBar()
             text_font_size = Screen:scaleBySize(12),
             text_font_bold = active,
             callback       = function() self:switchTab(tab.id) end,
-        })
+        }
     end
     return FrameContainer:new{
         width      = sw,
@@ -323,9 +285,9 @@ function HomeScreen:_tabBar()
     }
 end
 
--- ══════════════════════════════════════════════════════════════════════════════
+-- ═══════════════════════════════════════════════════════════════════════════════
 --  VIEW: HOME
--- ══════════════════════════════════════════════════════════════════════════════
+-- ═══════════════════════════════════════════════════════════════════════════════
 function HomeScreen:_homeView(w, h)
     local vg = VerticalGroup:new{ align = "left" }
 
@@ -334,17 +296,17 @@ function HomeScreen:_homeView(w, h)
     local greeting = hour < 12 and "Good morning."
                   or hour < 18 and "Good afternoon."
                   or                "Good evening."
-    table.insert(vg, TextWidget:new{
+    vg[#vg+1] = TextWidget:new{
         text    = greeting,
         face    = Font:getFace("tfont", Screen:scaleBySize(18)),
         fgcolor = C.black,
-    })
-    table.insert(vg, TextWidget:new{
+    }
+    vg[#vg+1] = TextWidget:new{
         text    = os.date("%A, %d %B %Y"),
         face    = F(12),
         fgcolor = C.dim,
-    })
-    table.insert(vg, divider(w))
+    }
+    vg[#vg+1] = divider(w)
 
     -- Currently reading
     local ReadHistory = lazy("readhistory")
@@ -359,7 +321,6 @@ function HomeScreen:_homeView(w, h)
         local title = item.text or "Unknown title"
         local pct   = 0
 
-        -- Try to read progress from DocSettings
         local DocSettings = lazy("docsettings")
         if DocSettings and item.file then
             pcall(function()
@@ -371,7 +332,7 @@ function HomeScreen:_homeView(w, h)
         end
 
         -- Book card
-        table.insert(vg, FrameContainer:new{
+        vg[#vg+1] = FrameContainer:new{
             width        = w,
             bordersize   = DIV_H,
             border_color = C.border,
@@ -401,34 +362,35 @@ function HomeScreen:_homeView(w, h)
                     callback   = function()
                         if item.file then
                             UIManager:close(self)
-                            local ok, ReaderUI = pcall(require, "apps/reader/readerui")
-                            if ok then ReaderUI:showReader(item.file) end
+                            local ReaderUI = package.loaded["apps/reader/readerui"]
+                                or require("apps/reader/readerui")
+                            ReaderUI:showReader(item.file)
                         end
                     end,
                 },
             },
-        })
+        }
     else
-        table.insert(vg, CenterContainer:new{
+        vg[#vg+1] = CenterContainer:new{
             dimen = Geom:new{ w = w, h = Screen:scaleBySize(80) },
             TextWidget:new{
                 text    = "No books opened yet.  Browse Files to start.",
                 face    = F(13),
                 fgcolor = C.dim,
             },
-        })
+        }
     end
 
     -- Recent list
     if #hist > 1 then
-        table.insert(vg, TextWidget:new{
+        vg[#vg+1] = TextWidget:new{
             text    = "Recent",
             face    = F(10),
             fgcolor = C.dim,
-        })
+        }
         for i = 2, math.min(#hist, 5) do
             local item = hist[i]
-            table.insert(vg, Button:new{
+            vg[#vg+1] = Button:new{
                 text           = item.text or "Unknown",
                 width          = w,
                 height         = ROW_H,
@@ -442,21 +404,22 @@ function HomeScreen:_homeView(w, h)
                 callback       = function()
                     if item.file then
                         UIManager:close(self)
-                        local ok, ReaderUI = pcall(require, "apps/reader/readerui")
-                        if ok then ReaderUI:showReader(item.file) end
+                        local ReaderUI = package.loaded["apps/reader/readerui"]
+                            or require("apps/reader/readerui")
+                        ReaderUI:showReader(item.file)
                     end
                 end,
-            })
-            table.insert(vg, divider(w))
+            }
+            vg[#vg+1] = divider(w)
         end
     end
 
     return vg
 end
 
--- ══════════════════════════════════════════════════════════════════════════════
+-- ═══════════════════════════════════════════════════════════════════════════════
 --  VIEW: LIBRARY
--- ══════════════════════════════════════════════════════════════════════════════
+-- ═══════════════════════════════════════════════════════════════════════════════
 function HomeScreen:_libraryView(w, h)
     local ReadHistory = lazy("readhistory")
     local hist = {}
@@ -471,22 +434,22 @@ function HomeScreen:_libraryView(w, h)
     local offset  = (ps.page - 1) * rows_pp
 
     local vg = VerticalGroup:new{ align = "left" }
-    table.insert(vg, TextWidget:new{
+    vg[#vg+1] = TextWidget:new{
         text    = "Library  —  " .. #hist .. " books",
         face    = F(12),
         fgcolor = C.dim,
-    })
-    table.insert(vg, divider(w))
+    }
+    vg[#vg+1] = divider(w)
 
     if #hist == 0 then
-        table.insert(vg, CenterContainer:new{
+        vg[#vg+1] = CenterContainer:new{
             dimen = Geom:new{ w = w, h = h - Screen:scaleBySize(40) },
             TextWidget:new{
                 text    = "Your library is empty.\nOpen a book via Files to get started.",
                 face    = F(13),
                 fgcolor = C.dim,
             },
-        })
+        }
         return vg
     end
 
@@ -502,7 +465,7 @@ function HomeScreen:_libraryView(w, h)
                 end
             end)
         end
-        table.insert(vg, Button:new{
+        vg[#vg+1] = Button:new{
             text           = (item.text or "Unknown") .. "  [" .. pct .. "%]",
             width          = w,
             height         = ROW_H,
@@ -516,27 +479,28 @@ function HomeScreen:_libraryView(w, h)
             callback       = function()
                 if item.file then
                     UIManager:close(self)
-                    local ok, ReaderUI = pcall(require, "apps/reader/readerui")
-                    if ok then ReaderUI:showReader(item.file) end
+                    local ReaderUI = package.loaded["apps/reader/readerui"]
+                        or require("apps/reader/readerui")
+                    ReaderUI:showReader(item.file)
                 end
             end,
-        })
-        table.insert(vg, divider(w))
+        }
+        vg[#vg+1] = divider(w)
     end
     return vg
 end
 
--- ══════════════════════════════════════════════════════════════════════════════
+-- ═══════════════════════════════════════════════════════════════════════════════
 --  VIEW: GOALS
--- ══════════════════════════════════════════════════════════════════════════════
+-- ═══════════════════════════════════════════════════════════════════════════════
 function HomeScreen:_goalsView(w, h)
     local vg = VerticalGroup:new{ align = "left" }
 
-    table.insert(vg, TextWidget:new{ text = "Reading Goals", face = F(16), fgcolor = C.black, bold = true })
-    table.insert(vg, divider(w))
+    vg[#vg+1] = TextWidget:new{ text = "Reading Goals", face = F(16), fgcolor = C.black, bold = true }
+    vg[#vg+1] = divider(w)
 
     local ReadHistory = lazy("readhistory")
-    local hist        = {}
+    local hist = {}
     if ReadHistory then
         pcall(function() ReadHistory:reload() end)
         hist = ReadHistory.hist or {}
@@ -561,7 +525,7 @@ function HomeScreen:_goalsView(w, h)
     local col_a = math.floor(w * 2 / 3)
     local col_b = w - col_a
     for _, s in ipairs(stats) do
-        table.insert(vg, FrameContainer:new{
+        vg[#vg+1] = FrameContainer:new{
             width      = w,
             height     = ROW_H,
             bordersize = 0,
@@ -584,25 +548,25 @@ function HomeScreen:_goalsView(w, h)
                     TextWidget:new{ text = s.value, face = F(14), fgcolor = C.black, bold = true },
                 },
             },
-        })
-        table.insert(vg, divider(w))
+        }
+        vg[#vg+1] = divider(w)
     end
 
-    table.insert(vg, TextWidget:new{
+    vg[#vg+1] = TextWidget:new{
         text    = "Enable the Statistics plugin for detailed data.",
         face    = F(11),
         fgcolor = C.dim,
-    })
+    }
     return vg
 end
 
--- ══════════════════════════════════════════════════════════════════════════════
+-- ═══════════════════════════════════════════════════════════════════════════════
 --  VIEW: MORE
--- ══════════════════════════════════════════════════════════════════════════════
+-- ═══════════════════════════════════════════════════════════════════════════════
 function HomeScreen:_moreView(w, h)
     local vg = VerticalGroup:new{ align = "left" }
-    table.insert(vg, TextWidget:new{ text = "More", face = F(16), fgcolor = C.black, bold = true })
-    table.insert(vg, divider(w))
+    vg[#vg+1] = TextWidget:new{ text = "More", face = F(16), fgcolor = C.black, bold = true }
+    vg[#vg+1] = divider(w)
 
     local entries = {
         { label = "OPDS Browser",       action = function() self:_act_opds()       end },
@@ -621,7 +585,7 @@ function HomeScreen:_moreView(w, h)
 
     for i = offset + 1, math.min(offset + rows_pp, #entries) do
         local e = entries[i]
-        table.insert(vg, Button:new{
+        vg[#vg+1] = Button:new{
             text           = e.label,
             width          = w,
             height         = ROW_H,
@@ -633,8 +597,8 @@ function HomeScreen:_moreView(w, h)
             text_font_size = Screen:scaleBySize(13),
             align          = "left",
             callback       = e.action,
-        })
-        table.insert(vg, divider(w))
+        }
+        vg[#vg+1] = divider(w)
     end
     return vg
 end
@@ -656,21 +620,11 @@ function HomeScreen:_act_opds()
 end
 
 function HomeScreen:_act_kosync()
-    local ok, KS = pcall(require, "plugins/kosync.koplugin/main")
-    if ok and KS and KS.kosync_settings then
-        KS:kosync_settings()
-    else
-        info("KOSync Settings:\nMain Menu → Tools → KOSync")
-    end
+    info("KOSync Settings:\nMain Menu → Tools → KOSync")
 end
 
 function HomeScreen:_act_stats()
-    local ok, St = pcall(require, "plugins/statistics.koplugin/main")
-    if ok and St and St.viewStats then
-        St:viewStats()
-    else
-        info("Statistics:\nMain Menu → Tools → Statistics")
-    end
+    info("Statistics:\nMain Menu → Tools → Statistics")
 end
 
 function HomeScreen:_act_search()
