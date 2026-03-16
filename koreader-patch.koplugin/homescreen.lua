@@ -29,11 +29,11 @@ local HorizontalGroup = require("ui/widget/horizontalgroup")
 local TextWidget      = require("ui/widget/textwidget")
 local Button          = require("ui/widget/button")
 local UIManager       = require("ui/uimanager")
-local Screen          = require("device/screen")
+local Device          = require("device")
+local Screen          = Device.screen  -- Screen is Device.screen, not a standalone module
 local Font            = require("ui/font")
 local Geom            = require("ui/geometry")
 local Blitbuffer      = require("ffi/blitbuffer")
-local Device          = require("device")
 local _               = require("gettext")
 
 -- ── Lazy-load helpers ─────────────────────────────────────────────────────────
