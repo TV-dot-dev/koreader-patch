@@ -585,7 +585,7 @@ function HomeScreen:_goalsView(w, h)
             HorizontalGroup:new{
                 align = "center",
                 LeftContainer:new{
-                    dimen = Geom:new{ w = w * 2 // 3, h = ROW_H },
+                    dimen = Geom:new{ w = math.floor(w * 2 / 3), h = ROW_H },
                     TextWidget:new{
                         text    = s.label,
                         face    = F(13),
@@ -593,7 +593,7 @@ function HomeScreen:_goalsView(w, h)
                     },
                 },
                 CenterContainer:new{
-                    dimen = Geom:new{ w = w // 3, h = ROW_H },
+                    dimen = Geom:new{ w = math.floor(w / 3), h = ROW_H },
                     TextWidget:new{
                         text    = s.value,
                         face    = F(14),
