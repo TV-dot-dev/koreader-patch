@@ -5,10 +5,6 @@
     "KOReader Patch" sub-menu to the main ☰ menu.
 --]]
 
--- Resolve this plugin's directory from the source path of this file.
--- Used to loadfile() homescreen.lua without polluting global package.path.
-local _plugin_dir = debug.getinfo(1, "S").source:match("^@?(.+)/[^/]*$") or "."
-
 local WidgetContainer = require("ui/widget/container/widgetcontainer")
 local UIManager       = require("ui/uimanager")
 local _               = require("gettext")
@@ -25,10 +21,6 @@ function KOReaderPatch:init()
     self._ready = true
 
     -- Only run in the FileManager context.
-    -- ReaderUI always has self.ui.document (the open book object).
-    -- FileManager never has it. This is the most reliable way to distinguish
-    -- the two contexts — more reliable than checking for file_chooser, which
-    -- may not be assigned yet when plugins are initialised.
     if not self.ui then return end
     if self.ui.document then return end  -- we're inside a book, skip
     if not self.ui.menu   then return end  -- no menu to attach to, skip
@@ -73,9 +65,25 @@ local _HomeScreen
 
 function KOReaderPatch:showHomeScreen()
     if not _HomeScreen then
-        -- Use the plugin's own directory (self.path is set by KOReader, fall
-        -- back to the path we resolved at load time).
-        local dir = self.path or _plugin_dir
+        -- self.path is set by KOReader's plugin loader to the .koplugin dir.
+        -- Fall back to resolving from this file's source path.
+        local dir = self.path
+        if not dir then
+            local ok, src = pcall(function()
+                return debug.getinfo(2, "S").source
+            end)
+            if ok and src then
+                dir = src:match("^@?(.+)/[^/]*$")
+            end
+        end
+        if not dir then
+            local InfoMessage = require("ui/widget/infomessage")
+            UIManager:show(InfoMessage:new{
+                text = "KOReader Patch — cannot determine plugin directory.",
+            })
+            return
+        end
+
         local path = dir .. "/homescreen.lua"
         local chunk, load_err = loadfile(path)
         if not chunk then
