@@ -5,6 +5,15 @@
     "KOReader Patch" sub-menu to the main ☰ menu.
 --]]
 
+-- ── Package path: ensure homescreen.lua can always be found ───────────────────
+-- KOReader's async scheduler can lose the plugin dir from package.path, so we
+-- pin it explicitly using the path of *this* file.
+local _src = debug.getinfo(1, "S").source
+local _dir = _src:match("^@?(.+)/[^/]*$") or "."
+if not package.path:find(_dir, 1, true) then
+    package.path = _dir .. "/?.lua;" .. package.path
+end
+
 local WidgetContainer = require("ui/widget/container/widgetcontainer")
 local UIManager       = require("ui/uimanager")
 local _               = require("gettext")
@@ -16,10 +25,12 @@ local KOReaderPatch = WidgetContainer:extend{
 
 -- ── init ─────────────────────────────────────────────────────────────────────
 function KOReaderPatch:init()
-    -- Guard: only run once, and only in FileManager context
+    -- Guard: only run once, and ONLY in the FileManager context.
+    -- Both FileManager and ReaderUI expose self.ui.menu, but only
+    -- FileManager exposes self.ui.file_chooser — use that to distinguish.
     if self._ready then return end
     self._ready = true
-    if not (self.ui and self.ui.menu) then return end
+    if not (self.ui and self.ui.file_chooser) then return end
 
     self.ui.menu:registerToMainMenu(self)
 
